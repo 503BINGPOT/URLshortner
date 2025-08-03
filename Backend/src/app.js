@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
 import connectDB from './config/db.js';
 import { redirectFromShortUrl } from './controller/short_url.controller.js';
 import { errorHandler } from './utils/errorHandler.js';
@@ -9,9 +10,30 @@ import cookieParser from 'cookie-parser';
 import { attachuser } from './utils/attachuser.js';
 import user_routes from './routers/user.route.js';
 import short_url from './routers/short_url.router.js';
+import { globalLimiter, redirectLimiter } from './middleware/rateLimiter.js';
 
 dotenv.config();
 const app = express();
+
+// Security middleware - helmet for security headers
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            scriptSrc: ["'self'"],
+            imgSrc: ["'self'", "data:", "https:"],
+        },
+    },
+    hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true
+    }
+}));
+
+// Global rate limiting
+app.use(globalLimiter);
 
 // CORS configuration
 const allowedOrigins = [
@@ -41,10 +63,10 @@ app.use(cors(corsOptions));
 // ✅ Handle preflight OPTIONS requests globally
 app.options('*', cors(corsOptions));
 
-// Cookie and body parsing
+// Cookie and body parsing with size limits
 app.use(cookieParser());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' })); // Limit request body size
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Attach user (should be after CORS & body parsing)
 app.use(attachuser);
@@ -66,8 +88,8 @@ app.use("/api/user", user_routes);
 app.use("/api/auth", authRoutes);
 app.use("/api/create", short_url);
 
-// Short URL redirect (should be last route)
-app.get("/:id", redirectFromShortUrl);
+// Short URL redirect (should be last route) with rate limiting
+app.get("/:id", redirectLimiter, redirectFromShortUrl);
 
 // Global error handler
 app.use(errorHandler);
