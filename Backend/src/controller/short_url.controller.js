@@ -1,5 +1,6 @@
 import { getShortUrl } from "../dao/short_url.js";
 import { createShortUrlWithoutUser, createShortUrlWithUser } from "../services/short_url.service.js";
+import { validateUrlSafety } from "../services/urlSecurity.service.js";
 import shortUrl from "../models/shorturl.model.js";
 import wrapAsync from "../utils/tryCatchWrapper.js";
 
@@ -7,6 +8,16 @@ import wrapAsync from "../utils/tryCatchWrapper.js";
 export const createShortUrl = wrapAsync(async (req, res) => {
     const data = req.body
     console.log("Create short URL request received:", data); 
+    
+    // Validate URL safety before creating short URL
+    const safetyCheck = await validateUrlSafety(data.url);
+    if (!safetyCheck.safe) {
+        return res.status(400).json({
+            success: false,
+            message: `URL rejected: ${safetyCheck.reason}`
+        });
+    }
+    
     let shortUrl
     
     if(req.user) {
@@ -35,6 +46,15 @@ export const redirectFromShortUrl = wrapAsync(async (req,res)=>{
       url.clicks++;
       await url.save();
 
+      // Validate the stored URL before redirecting (additional safety check)
+      const safetyCheck = await validateUrlSafety(url.fullUrl);
+      if (!safetyCheck.safe) {
+        return res.status(400).json({ 
+          success: false,
+          message: "This URL has been flagged as potentially unsafe and cannot be accessed" 
+        });
+      }
+
       const redirectTo = /^https?:\/\//.test(url.fullUrl)
         ? url.fullUrl
         : `https://${url.fullUrl}`;
@@ -44,6 +64,7 @@ export const redirectFromShortUrl = wrapAsync(async (req,res)=>{
       return res.status(404).json({ message: "URL not found" });
     }
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error('Redirect error:', error);
+    res.status(500).json({ message: "Server error" });
   }
 })
